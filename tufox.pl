@@ -329,11 +329,8 @@ find_path(Start,Goal,Visited,Next) :-
 
 resolve_meeting :-
     write('--- Meeting called ---'),nl,
-    (   catch(run_votes, Err, (print_message(error, Err), fail))
-    ->  true
-    ;   write('Meeting could not be resolved; continuing game.'),nl
-    ),
-    update_meeting_timer_safe,
+    run_votes,
+    update_meeting_timer,
     !.
 
 run_votes :-
@@ -381,8 +378,9 @@ eliminate(Target) :-
     assertz(body(Room,Target)),
     format('~w is ejected!~n',[Target]).
 
-update_meeting_timer_safe :-
-    (round_counter(R) -> true ; R = 1, assertz(round_counter(R))),
+update_meeting_timer :-
+    retractall(next_meeting(_)),
+    round_counter(R),
     NM is R + 3,
     retractall(next_meeting(_)),
     assertz(next_meeting(NM)),
