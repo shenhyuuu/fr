@@ -1,5 +1,7 @@
 % TuFox text adventure game with AI rabbits and planner-driven detective
 
+:- use_module(library(readutil)).
+
 :- dynamic location/2.
 :- dynamic alive/1.
 :- dynamic role/2.
@@ -194,8 +196,26 @@ player_done :-
 
 player_turn :-
     (alive(player) -> true ; write('You are dead. Watching the chaos...'),nl, player_done),
-    read(Command),
-    (Command == quit -> halt ; call(Command)).
+    read_command(Command),
+    (Command == quit -> halt ; (catch(call(Command), Err, (print_message(error, Err), player_turn)))).
+
+read_command(Command) :-
+    prompt('|: ', ''),
+    read_line_to_string(user_input, Raw),
+    normalize_space(string(Trimmed), Raw),
+    (Trimmed == "" -> read_command(Command)
+    ; ensure_period(Trimmed, WithPeriod),
+      (   catch(read_term_from_atom(WithPeriod, Command, []), error(syntax_error(_),_), fail)
+      ->  true
+      ;   write('Could not parse that command. Try syntax like look. or kill(bunny1).'),nl,
+          read_command(Command)
+      )
+    ).
+
+ensure_period(Str, Str) :-
+    sub_string(Str, _, 1, 0, '.'), !.
+ensure_period(Str, WithPeriod) :-
+    string_concat(Str, '.', WithPeriod).
 
 progress_task(Task,Room,Actor) :-
     retract(task(Task,Room,Need,Remaining,in_progress,Actor)),
