@@ -268,17 +268,23 @@ ai_act_logic(AI) :-
 
 ai_act_logic(detective) :-
     location(detective,Room),
-    (body(Room,_) -> resolve_meeting ; true),
-    cooldown(detective,inspect,CD),
-    (CD =:= 0, body(Room,_), findall(T, (location(T,Room), alive(T), T \= detective, \+ inspected(T)), Targets), Targets \= [] ->
-        Targets = [Target|_],
-        inspect_identity(Target)
-    ; execute_plan_step(detective)).
+    ( body(Room,_) ->
+        resolve_meeting
+    ; ( cooldown(detective,inspect,CD),
+        CD =:= 0,
+        findall(T, (location(T,Room), alive(T), T \= detective, \+ inspected(T)), Targets),
+        Targets \= [] ->
+            Targets = [Target|_],
+            inspect_identity(Target)
+      ; execute_plan_step(detective)
+      )
+    ).
 
 ai_act_logic(AI) :-
     location(AI,Room),
-    (body(Room,_) -> resolve_meeting ; true),
-    attempt_task(AI).
+    (body(Room,_) ->
+        resolve_meeting
+    ; attempt_task(AI)).
 
 inspect_identity(Target) :-
     role(Target, Role),
@@ -398,7 +404,7 @@ decrement_cooldowns :-
 
 execute_plan_step(detective) :-
     plan_for_detective(Plan),
-    execute_plan(detective, Plan).
+    (Plan = [Action|_] -> apply_action(detective, Action) ; true).
 
 plan_for_detective(Plan) :-
     (run_pyperplan(Plan) -> true ; default_plan(Plan)).
@@ -408,11 +414,6 @@ default_plan([
     move(detective,kitchen),
     inspect(player)
 ]).
-
-execute_plan(_,[]).
-execute_plan(Agent,[Action|Rest]) :-
-    (apply_action(Agent,Action) -> true ; true),
-    execute_plan(Agent,Rest).
 
 apply_action(_,move(detective,Room)) :-
     move_ai_toward(detective,Room).
