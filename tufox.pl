@@ -295,7 +295,7 @@ inspect_identity(Target) :-
     format('Detective inspects ~w and sees role ~w.~n',[Target,Role]).
 
 attempt_task(AI) :-
-    (choose_task(TargetTask, TargetRoom) ->
+    (choose_task(AI, TargetTask, TargetRoom) ->
         location(AI,Room),
         (Room == TargetRoom ->
             (task(TargetTask,Room,_,_,available,none) ->
@@ -311,8 +311,40 @@ attempt_task(AI) :-
 progress_task_if_owner(AI,Task,Room) :-
     (task(Task,Room,_,_,in_progress,AI) -> progress_task(Task,Room,AI) ; true).
 
-choose_task(Task, Room) :-
-    task(Task,Room,_,_,Status,_), Status \= complete.
+choose_task(AI, Task, Room) :-
+    location(AI,Current),
+    findall(dist(D,Task0,Room0),
+        ( task(Task0,Room0,_,_,Status,Occupant),
+          Status \= complete,
+          preferred_task(AI, Status, Occupant),
+          shortest_distance(Current, Room0, D)
+        ),
+        Distances),
+    Distances \= [],
+    closest_tasks(Distances, Closest),
+    random_member(dist(_, Task, Room), Closest).
+
+preferred_task(_, available, _).
+preferred_task(AI, in_progress, Occupant) :- Occupant == AI.
+
+closest_tasks(Distances, Closest) :-
+    findall(D, member(dist(D,_,_), Distances), Ds),
+    min_list(Ds, Min),
+    include(matches_distance(Min), Distances, Closest).
+
+matches_distance(Min, dist(D,_,_)) :- D =:= Min.
+
+shortest_distance(Room, Room, 0) :- !.
+shortest_distance(Start, Goal, Dist) :-
+    bfs_queue([(Start,0)], [Start], Goal, Dist).
+
+bfs_queue([(Node,D)|_], _, Goal, D) :- Node == Goal, !.
+bfs_queue([(Node,D)|Rest], Visited, Goal, Dist) :-
+    findall((Next,D1), (path(Node,Next), \+ member(Next,Visited), D1 is D+1), Nexts),
+    findall(Next, member((Next,_), Nexts), NextRooms),
+    append(Rest, Nexts, Queue),
+    append(Visited, NextRooms, NewVisited),
+    bfs_queue(Queue, NewVisited, Goal, Dist).
 
 move_ai_toward(AI,TargetRoom) :-
     location(AI,Room),
