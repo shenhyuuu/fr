@@ -2,6 +2,7 @@
 
 :- use_module(library(readutil)).
 :- use_module(library(random)).
+:- use_module(library(apply)).
 
 :- dynamic location/2.
 :- dynamic alive/1.
@@ -14,6 +15,7 @@
 :- dynamic round_counter/1.
 :- dynamic revealed_fox/1.
 :- dynamic vote/2.
+:- dynamic alias/2.
 
 rooms([kitchen,living_room,bathroom,bedroom,balcony]).
 
@@ -80,14 +82,33 @@ reset_world :-
     retractall(round_counter(_)),
     retractall(revealed_fox(_)),
     retractall(vote(_,_)),
+    retractall(alias(_,_)),
     initial_tasks(Tasks),
     forall(member(T, Tasks), assertz(T)),
     forall(characters(Cs), (forall(member(C,Cs), assertz(alive(C))))),
+    assign_aliases,
     assign_initial_locations,
     assertz(cooldown(player,kill,0)),
     assertz(cooldown(detective,inspect,2)),
     assertz(next_meeting(3)),
     assertz(round_counter(0)).
+
+assign_aliases :-
+    characters(Chars),
+    exclude(=(player), Chars, NonPlayer),
+    length(NonPlayer, Count),
+    numlist(1, Count, Numbers),
+    maplist(number_alias, Numbers, Aliases),
+    random_permutation(Aliases, Shuffled),
+    pair_aliases(NonPlayer, Shuffled).
+
+number_alias(N, AliasAtom) :-
+    atomic_list_concat([rabbit, N], AliasAtom).
+
+pair_aliases([], []).
+pair_aliases([C|Cs], [A|As]) :-
+    assertz(alias(C,A)),
+    pair_aliases(Cs, As).
 
 assign_initial_locations :-
     rooms(Rooms),
@@ -120,9 +141,10 @@ print_connected(Room) :-
 
 print_room_state(Room) :-
     findall(C, (location(C,Room), alive(C), C \= player), Others),
-    (Others = [] -> write('No other characters here.\n')
-    ; format('Others here: ~w~n', [Others])),
-    (body(Room,V) -> format('There is a body here: ~w~n',[V]); true),
+    display_names(Others, VisibleOthers),
+    (VisibleOthers = [] -> write('No other characters here.\n')
+    ; format('Others here: ~w~n', [VisibleOthers])),
+    (body(Room,V) -> (visible_name(V,VisibleV), format('There is a body here: ~w~n',[VisibleV])) ; true),
     findall(T, (task(T,Room,_,Remaining,Status,_), member(Status,[available,in_progress]), Remaining>0), Tasks),
     (Tasks = [] -> true ; format('Active tasks here: ~w~n',[Tasks]) ).
 
@@ -130,7 +152,8 @@ status :-
     round_counter(R),
     format('Round ~w.~n', [R]),
     alive_rabbits(AliveRabbits),
-    format('Alive rabbits: ~w~n', [AliveRabbits]),
+    display_names(AliveRabbits, VisibleRabbits),
+    format('Alive rabbits: ~w~n', [VisibleRabbits]),
     (alive(player) -> write('You are alive.\n'); write('You are dead.\n')),
     list_tasks_status,
     show_cooldowns.
@@ -138,7 +161,8 @@ status :-
 list_tasks_status :-
     findall(desc(T,Room,Status,Remaining,Occupant), task(T,Room,_,Remaining,Status,Occupant), Descs),
     forall(member(desc(T,Room,S,R,O), Descs), (
-        format('Task ~w in ~w: ~w (~w rounds left, occupant ~w)~n', [T,Room,S,R,O])
+        visible_name(O, VisibleO),
+        format('Task ~w in ~w: ~w (~w rounds left, occupant ~w)~n', [T,Room,S,R,VisibleO])
     )).
 
 show_cooldowns :-
@@ -185,12 +209,14 @@ kill(Target) :-
     alive(player),
     cooldown(player,kill,CD),
     (CD > 0 -> format('Kill skill cooling down (~w).~n',[CD]), player_turn
-    ; location(player,Room), location(Target,Room), alive(Target), Target \= player ->
-        retract(alive(Target)),
-        assertz(body(Room,Target)),
+    ; resolve_target(Target, Resolved),
+      location(player,Room), location(Resolved,Room), alive(Resolved), Resolved \= player ->
+        retract(alive(Resolved)),
+        assertz(body(Room,Resolved)),
         retract(cooldown(player,kill,_)),
         assertz(cooldown(player,kill,3)),
-        format('You eliminated ~w!~n',[Target]),
+        visible_name(Resolved, Visible),
+        format('You eliminated ~w!~n',[Visible]),
         player_done
     ; write('No valid target here.'),nl, player_turn).
 
@@ -233,6 +259,17 @@ ensure_period(Str, Str) :-
     sub_string(Str, _, 1, 0, '.'), !.
 ensure_period(Str, WithPeriod) :-
     string_concat(Str, '.', WithPeriod).
+
+visible_name(player, you) :- !.
+visible_name(none, none) :- !.
+visible_name(Char, Name) :-
+    (alias(Char, Alias) -> Name = Alias ; Name = Char).
+
+display_names(Chars, Names) :-
+    maplist(visible_name, Chars, Names).
+
+resolve_target(Input, Target) :-
+    (alias(Target, Input) -> true ; Target = Input).
 
 progress_task(Task,Room,Actor) :-
     retract(task(Task,Room,Need,Remaining,in_progress,Actor)),
@@ -309,7 +346,8 @@ inspect_identity(Target) :-
     retract(cooldown(detective,inspect,_)),
     assertz(cooldown(detective,inspect,2)),
     (Role == fox -> assertz(revealed_fox(Target)), resolve_meeting ; true),
-    format('Detective inspects ~w and sees role ~w.~n',[Target,Role]).
+    visible_name(Target, VisibleTarget),
+    format('An inspection reveals ~w is ~w.~n',[VisibleTarget,Role]).
 
 attempt_task(AI) :-
     (choose_task(AI, TargetTask, TargetRoom) ->
@@ -318,7 +356,8 @@ attempt_task(AI) :-
             (task(TargetTask,Room,_,_,available,none) ->
                 retract(task(TargetTask,Room,N,R,available,none)),
                 assertz(task(TargetTask,Room,N,R,in_progress,AI)),
-                format('~w starts task ~w.~n',[AI,TargetTask])
+                visible_name(AI, VisibleAI),
+                format('~w starts task ~w.~n',[VisibleAI,TargetTask])
             ; progress_task_if_owner(AI,TargetTask,Room)
             )
         ; move_ai_toward(AI,TargetRoom)
@@ -369,7 +408,8 @@ move_ai_toward(AI,TargetRoom) :-
     (nonvar(Next) -> (
         retract(location(AI,Room)),
         assertz(location(AI,Next)),
-        format('~w moves to ~w.~n',[AI,Next])
+        visible_name(AI, VisibleAI),
+        format('~w moves to ~w.~n',[VisibleAI,Next])
     ) ; true).
 
 find_path(Start,Goal,Visited,Next) :-
@@ -390,9 +430,10 @@ run_votes :-
     tally_votes.
 
 player_vote :-
-    write('Cast your vote (atom ending with period). alive characters: '), alive_rabbits(Rs), write(Rs),nl,
+    write('Cast your vote (atom ending with period). alive characters: '),
+    alive_rabbits(Rs), display_names(Rs, Visible), write(Visible),nl,
     read(V),
-    (alive(V), V \= player -> assertz(vote(player,V)) ; write('Abstain.'),nl).
+    (resolve_target(V, Target), alive(Target), Target \= player -> assertz(vote(player,Target)) ; write('Abstain.'),nl).
 
 ai_votes :-
     forall((alive(AI), AI \= player), ai_single_vote(AI)).
@@ -405,7 +446,9 @@ ai_single_vote(AI) :-
     ; random_vote(Candidates, Vote)
     ),
     assertz(vote(AI, Vote)),
-    format('~w votes for ~w.~n',[AI,Vote]).
+    visible_name(AI, VisibleAI),
+    visible_name(Vote, VisibleVote),
+    format('~w votes for ~w.~n',[VisibleAI,VisibleVote]).
 
 alive_targets_for_vote(AI, Candidates) :-
     findall(T, (alive(T), T \= AI), Candidates).
@@ -430,12 +473,13 @@ count_targets([H|T], Counts) :-
 eliminate(Target) :-
     alive(Target),
     retract(alive(Target)),
+    visible_name(Target, VisibleTarget),
     (   Target == player
-    ->  format('~w is ejected!~n',[Target]),
+    ->  format('~w is ejected!~n',[VisibleTarget]),
         rabbits_win,
         halt
     ;   location(Target,_),
-        format('~w is ejected!~n',[Target])
+        format('~w is ejected!~n',[VisibleTarget])
     ).
 
 update_meeting_timer :-
