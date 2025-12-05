@@ -451,7 +451,14 @@ update_meeting_timer :-
 
 tick_world :-
     decrement_cooldowns,
-    round_counter(R), R1 is R+1, retract(round_counter(_)), assertz(round_counter(R1)).
+    round_counter(R),
+    R1 is R+1,
+    retract(round_counter(_)),
+    assertz(round_counter(R1)),
+    print_round(R1).
+
+print_round(R) :-
+    format('--- Round ~w ---~n', [R]).
 
 decrement_cooldowns :-
     forall(cooldown(Char,Skill,CD), (
