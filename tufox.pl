@@ -28,10 +28,14 @@ path(bedroom,balcony).
 path(balcony,bedroom).
 
 % task(TaskId, Room, NeededRounds, RemainingRounds, Status, Occupant)
+% Increase NeededRounds to give the fox more time to act before rabbits auto-win.
+% Prior values (2/3/2) let coordinated rabbits clear objectives in just a few cycles;
+% bumping them roughly doubles the work while keeping relative difficulty between
+% rooms similar.
 initial_tasks([
-    task(collect_food,kitchen,2,2,available,none),
-    task(fix_wiring,living_room,3,3,available,none),
-    task(clean_vent,bedroom,2,2,available,none)
+    task(collect_food,kitchen,4,4,available,none),
+    task(fix_wiring,living_room,5,5,available,none),
+    task(clean_vent,bedroom,4,4,available,none)
 ]).
 
 characters([player,bunny1,bunny2,bunny3,bunny4,detective]).
