@@ -17,28 +17,89 @@
 :- dynamic vote/2.
 :- dynamic alias/2.
 
-rooms([kitchen,living_room,bathroom,bedroom,balcony]).
+rooms([
+    'Tower','Library','Armory','Observatory',
+    'Hall','Dining Room','Kitchen','Storage',
+    'Study','Throne Room','Bathroom','Bedroom',
+    'Chapel','Dungeon','Wine Cellar','Balcony'
+]).
 
-% bi-directional edges
-path(kitchen,living_room).
-path(living_room,kitchen).
-path(living_room,bathroom).
-path(bathroom,living_room).
-path(living_room,bedroom).
-path(bedroom,living_room).
-path(bedroom,balcony).
-path(balcony,bedroom).
+rooms_grid([
+    ['Tower','Library','Armory','Observatory'],
+    ['Hall','Dining Room','Kitchen','Storage'],
+    ['Study','Throne Room','Bathroom','Bedroom'],
+    ['Chapel','Dungeon','Wine Cellar','Balcony']
+]).
+
+% bi-directional edges for the 4x4 grid map
+path('Tower','Library').
+path('Library','Tower').
+path('Library','Armory').
+path('Armory','Library').
+path('Armory','Observatory').
+path('Observatory','Armory').
+path('Hall','Dining Room').
+path('Dining Room','Hall').
+path('Dining Room','Kitchen').
+path('Kitchen','Dining Room').
+path('Kitchen','Storage').
+path('Storage','Kitchen').
+path('Study','Throne Room').
+path('Throne Room','Study').
+path('Throne Room','Bathroom').
+path('Bathroom','Throne Room').
+path('Bathroom','Bedroom').
+path('Bedroom','Bathroom').
+path('Chapel','Dungeon').
+path('Dungeon','Chapel').
+path('Dungeon','Wine Cellar').
+path('Wine Cellar','Dungeon').
+path('Wine Cellar','Balcony').
+path('Balcony','Wine Cellar').
+path('Tower','Hall').
+path('Hall','Tower').
+path('Library','Dining Room').
+path('Dining Room','Library').
+path('Armory','Kitchen').
+path('Kitchen','Armory').
+path('Observatory','Storage').
+path('Storage','Observatory').
+path('Study','Chapel').
+path('Chapel','Study').
+path('Throne Room','Dungeon').
+path('Dungeon','Throne Room').
+path('Bathroom','Wine Cellar').
+path('Wine Cellar','Bathroom').
+path('Bedroom','Balcony').
+path('Balcony','Bedroom').
 
 % task(TaskId, Room, NeededRounds, RemainingRounds, Status, Occupant)
-% Increase NeededRounds to give the fox more time to act before rabbits auto-win.
-% Prior values (2/3/2) let coordinated rabbits clear objectives in just a few cycles;
-% bumping them roughly doubles the work while keeping relative difficulty between
-% rooms similar.
-initial_tasks([
-    task(collect_food,kitchen,4,4,available,none),
-    task(fix_wiring,living_room,5,5,available,none),
-    task(clean_vent,bedroom,4,4,available,none)
+task_specs([
+    spec(collect_food,4),
+    spec(fix_wiring,5),
+    spec(clean_vent,4),
+    spec(fix_chandelier,3),
+    spec('Organize Ancient Scrolls',2)
 ]).
+
+assign_tasks_to_rooms :-
+    task_specs(Specs),
+    rooms(Rooms),
+    random_permutation(Rooms, Shuffled),
+    length(Specs, Count),
+    take(Count, Shuffled, SelectedRooms),
+    assign_spec_to_room(Specs, SelectedRooms).
+
+assign_spec_to_room([], []).
+assign_spec_to_room([spec(Task,Need)|Specs], [Room|Rooms]) :-
+    assertz(task(Task,Room,Need,Need,available,none)),
+    assign_spec_to_room(Specs, Rooms).
+
+take(0, _, []).
+take(N, [H|T], [H|Rest]) :-
+    N > 0,
+    N1 is N-1,
+    take(N1, T, Rest).
 
 characters([player,bunny1,bunny2,bunny3,bunny4,detective]).
 role(player,fox).
@@ -83,8 +144,7 @@ reset_world :-
     retractall(revealed_fox(_)),
     retractall(vote(_,_)),
     retractall(alias(_,_)),
-    initial_tasks(Tasks),
-    forall(member(T, Tasks), assertz(T)),
+    assign_tasks_to_rooms,
     forall(characters(Cs), (forall(member(C,Cs), assertz(alive(C))))),
     assign_aliases,
     assign_initial_locations,
@@ -132,7 +192,8 @@ look :-
     location(player,Room),
     format('You are in the ~w.~n', [Room]),
     print_connected(Room),
-    print_room_state(Room).
+    print_room_state(Room),
+    display_map.
 
 print_connected(Room) :-
     findall(Dest, path(Room, Dest), Ds),
@@ -156,6 +217,7 @@ status :-
     format('Alive rabbits: ~w~n', [VisibleRabbits]),
     (alive(player) -> write('You are alive.\n'); write('You are dead.\n')),
     list_tasks_status,
+    display_map,
     show_cooldowns.
 
 list_tasks_status :-
@@ -356,9 +418,7 @@ attempt_task(AI) :-
         (Room == TargetRoom ->
             (task(TargetTask,Room,_,_,available,none) ->
                 retract(task(TargetTask,Room,N,R,available,none)),
-                assertz(task(TargetTask,Room,N,R,in_progress,AI)),
-                visible_name(AI, VisibleAI),
-                format('~w starts task ~w.~n',[VisibleAI,TargetTask])
+                assertz(task(TargetTask,Room,N,R,in_progress,AI))
             ; progress_task_if_owner(AI,TargetTask,Room)
             )
         ; move_ai_toward(AI,TargetRoom)
@@ -510,6 +570,33 @@ tick_world :-
 print_round(R) :-
     format('--- Round ~w ---~n', [R]).
 
+% Map rendering helpers
+display_map :-
+    nl,
+    write('Map:'),nl,
+    rooms_grid(Rows),
+    forall(member(Row, Rows), (
+        maplist(cell_display, Row, Cells),
+        atomics_to_string(Cells, ' | ', Line),
+        write(Line), nl
+    )),
+    nl.
+
+cell_display(Room, Display) :-
+    room_label(Room, Label),
+    player_marker(Room, PM),
+    task_marker(Room, TM),
+    atomics_to_string([PM,Label,TM], '', Display).
+
+room_label(Room, Label) :- atom_string(Room, Label).
+
+player_marker(Room, "● ") :- location(player, Room), !.
+player_marker(_, "").
+
+task_marker(Room, " ✓") :- task(_,Room,_,_,complete,_), !.
+task_marker(Room, " ✗") :- task(_,Room,_,_,available,_), !.
+task_marker(_, "").
+
 decrement_cooldowns :-
     forall(cooldown(Char,Skill,CD), (
         New is max(0, CD-1),
@@ -540,8 +627,8 @@ plan_for_detective(Plan) :-
     (run_pyperplan(Plan) -> true ; default_plan(Plan)).
 
 default_plan([
-    move(detective,living_room),
-    move(detective,kitchen),
+    move(detective,'Hall'),
+    move(detective,'Kitchen'),
     inspect(player)
 ]).
 
@@ -568,5 +655,18 @@ read_lines(Stream, [L|Ls]) :-
 parse_action(Line, move(detective,Room)) :-
     sub_atom(Line,_,_,_, 'move'),
     atomic_list_concat(['(', 'move', detective, RoomAtom, ')' ], ' ', Line),
-    atom_string(Room, RoomAtom).
+    room_from_plan_atom(RoomAtom, Room).
 parse_action(_, inspect(player)).
+
+room_from_plan_atom(RoomAtom, Room) :-
+    atom_string(RoomAtom, PlanString),
+    normalize_token(PlanString, NormalizedPlan),
+    rooms(Rooms),
+    member(Room, Rooms),
+    atom_string(Room, RoomString),
+    normalize_token(RoomString, NormalizedPlan), !.
+
+normalize_token(Str, Normalized) :-
+    string_lower(Str, Lower),
+    split_string(Lower, " _", " _", Parts),
+    atomic_list_concat(Parts, '', Normalized).
