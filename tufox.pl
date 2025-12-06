@@ -591,8 +591,12 @@ display_map :-
     write('Map:'),nl,
     rooms_grid(Rows),
     maplist(maplist(cell_display), Rows, CellRows),
-    flatten(CellRows, AllCells),
-    maplist(string_length, AllCells, Lengths),
+    findall(Len, (
+        member(Row, CellRows),
+        member(Cell, Row),
+        member(Line, Cell),
+        string_length(Line, Len)
+    ), Lengths),
     max_list(Lengths, MaxCellLen0),
     MaxCellLen is max(12, MaxCellLen0),
     % render each row with separators for consistent alignment
@@ -600,8 +604,8 @@ display_map :-
         length(RowCells, Count),
         row_separator(Count, MaxCellLen, Sep),
         write(Sep), nl,
-        render_row(RowCells, MaxCellLen, Line),
-        write(Line), nl
+        render_row(RowCells, MaxCellLen, Lines),
+        forall(member(Line, Lines), (write(Line), nl))
     )),
     CellRows = [FirstRow|_],
     length(FirstRow, FirstCount),
@@ -617,8 +621,15 @@ row_separator(CellCount, CellWidth, Separator) :-
     atomic_list_concat(Chunks, '+', Body),
     atomic_list_concat(['+', Body, '+'], Separator).
 
-render_row(Cells, Width, Line) :-
-    maplist(pad_cell(Width), Cells, Padded),
+render_row(Cells, Width, Lines) :-
+    Cells = [FirstCell|_],
+    length(FirstCell, CellHeight),
+    numlist(1, CellHeight, Indexes),
+    maplist(row_line(Cells, Width), Indexes, Lines).
+
+row_line(Cells, Width, Index, Line) :-
+    maplist(nth1(Index), Cells, Texts),
+    maplist(pad_cell(Width), Texts, Padded),
     atomic_list_concat(Padded, '|', Body),
     atomic_list_concat(['|', Body, '|'], Line).
 
@@ -633,16 +644,16 @@ repeat_char(N, Char, String) :-
     maplist(=(Char), Chars),
     atomics_to_string(Chars, '', String).
 
-cell_display(Room, Display) :-
+cell_display(Room, [RoomLine, TaskLine]) :-
     room_label(Room, Label),
     player_hint(Room, PH),
     task_hint(Room, TH),
     include(\=(""), [PH, TH], Hints),
     (   Hints = []
-    ->  Display = Label
-    ;   atomics_to_string(Hints, ' ', HintText),
-        atomic_list_concat([Label, ' ', HintText], Display)
-    ).
+    ->  RoomLine = Label
+    ;   atomics_to_string([Label|Hints], ' ', RoomLine)
+    ),
+    room_tasks_line(Room, TaskLine).
 
 room_label(Room, Label) :- atom_string(Room, Label).
 
@@ -651,6 +662,22 @@ player_hint(_, "").
 
 task_hint(Room, "(Finished)") :- task(_,Room,_,_,complete,_), !.
 task_hint(_, "").
+
+room_tasks_line(Room, Line) :-
+    findall(Display,
+        ( task(TaskName,Room,_,_,Status,_),
+          task_status_label(Status, StatusLabel),
+          format(string(Display), "~w~w", [TaskName, StatusLabel])
+        ),
+        Tasks),
+    (   Tasks = []
+    ->  Line = ""
+    ;   atomics_to_string(Tasks, ', ', TaskText),
+        atomic_list_concat(['Task:', TaskText], ' ', Line)
+    ).
+
+task_status_label(complete, " (done)") :- !.
+task_status_label(_, "").
 
 decrement_cooldowns :-
     forall(cooldown(Char,Skill,CD), (
