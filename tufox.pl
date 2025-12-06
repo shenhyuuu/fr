@@ -83,11 +83,7 @@ print_help :-
     write('  move(Direction).         % move up/down/left/right on the map'),nl,
     write('  look.                    % describe current room'),nl,
     write('  status.                  % show game status'),nl,
-    write('  perform(Task).           % work on a task in this room'),nl,
     write('  kill(Target).            % eliminate a rabbit in this room (cooldown 3)'),nl,
-    write('  inspect(Target).         % if detective is AI, player cannot inspect'),nl,
-    write('  call_meeting.            % call emergency meeting'),nl,
-    write('  vote(Target).            % vote during meetings'),nl,
     write('  wait.                    % end your action'),nl,
     nl.
 
@@ -247,25 +243,6 @@ wait :-
     write('You wait.'),nl,
     player_done.
 
-perform(Task) :-
-    alive(player),
-    location(player,Room),
-    (task(Task,Room,Need,Remaining,Status,Occupant) -> (
-        (Status == available ->
-            retract(task(Task,Room,Need,Remaining,Status,Occupant)),
-            NewR is Need - 1,
-            assertz(task(Task,Room,Need,NewR,in_progress,player)),
-            write('You start the task.'),nl,
-            player_done
-        ; Status == in_progress, Occupant == player ->
-            progress_task(Task,Room,player),
-            player_done
-        ; Status == in_progress ->
-            write('Someone else is on that task.'),nl, player_turn
-        ; Status == complete ->
-            write('Task already complete.'),nl, player_turn)
-    ) ; (write('No such task here.'),nl, player_turn)).
-
 kill(Target) :-
     alive(player),
     cooldown(player,kill,CD),
@@ -281,19 +258,6 @@ kill(Target) :-
         format('You eliminated ~w!~n',[Visible]),
         player_done
     ; write('No valid target here.'),nl, player_turn).
-
-inspect(_) :-
-    write('Only the AI detective inspects identities.'),nl,
-    player_turn.
-
-call_meeting :-
-    write('You report a body and call a meeting.'),nl,
-    resolve_meeting,
-    player_done.
-
-vote(_) :-
-    write('Voting only happens during meetings.'),nl,
-    player_turn.
 
 player_done :-
     ai_turns,
@@ -348,7 +312,11 @@ progress_task(Task,Room,Actor) :-
     ) ; assertz(task(Task,Room,Need,NewR,in_progress,Actor))).
 
 check_bodies(Room) :-
-    (body(Room,_) -> write('You spot a body here! You may call a meeting.'),nl ; true).
+    (   body(Room,_)
+    ->  write('You spot a body here! A meeting will be triggered.'),nl,
+        resolve_meeting
+    ;   true
+    ).
 
 game_loop :-
     (check_victory -> true ;
