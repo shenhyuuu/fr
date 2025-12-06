@@ -584,18 +584,22 @@ display_map :-
 
 cell_display(Room, Display) :-
     room_label(Room, Label),
-    player_marker(Room, PM),
-    task_marker(Room, TM),
-    atomics_to_string([PM,Label,TM], '', Display).
+    player_hint(Room, PH),
+    task_hint(Room, TH),
+    include(\=(""), [PH, TH], Hints),
+    (   Hints = []
+    ->  Display = Label
+    ;   atomics_to_string(Hints, ' ', HintText),
+        atomic_list_concat([Label, ' ', HintText], Display)
+    ).
 
 room_label(Room, Label) :- atom_string(Room, Label).
 
-player_marker(Room, "● ") :- location(player, Room), !.
-player_marker(_, "").
+player_hint(Room, "(You are here)") :- location(player, Room), !.
+player_hint(_, "").
 
-task_marker(Room, " ✓") :- task(_,Room,_,_,complete,_), !.
-task_marker(Room, " ✗") :- task(_,Room,_,_,available,_), !.
-task_marker(_, "").
+task_hint(Room, "(Finished)") :- task(_,Room,_,_,complete,_), !.
+task_hint(_, "").
 
 decrement_cooldowns :-
     forall(cooldown(Char,Skill,CD), (
