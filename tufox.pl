@@ -130,7 +130,7 @@ start :-
 print_help :-
     nl,
     write('Commands:'),nl,
-    write('  move(Room).              % move to connected room'),nl,
+    write('  move(Direction).         % move up/down/left/right on the map'),nl,
     write('  look.                    % describe current room'),nl,
     write('  status.                  % show game status'),nl,
     write('  perform(Task).           % work on a task in this room'),nl,
@@ -241,16 +241,52 @@ show_cooldowns :-
         cooldown(player, Skill, V), format('Cooldown ~w: ~w~n',[Skill,V])
     )).
 
-move(To) :-
+move(Direction) :-
     alive(player),
     location(player,From),
-    (path(From,To) -> (
-        retract(location(player,From)),
+    (   adjacent_room(From, Direction, To)
+    ->  retract(location(player,From)),
         assertz(location(player,To)),
         format('You moved to ~w.~n',[To]),
         check_bodies(To),
         player_done
-    ) ; (write('Cannot move there from here.'),nl, player_turn)).
+    ;   valid_direction(Direction)
+    ->  write('Cannot move in that direction from here.'),nl, player_turn
+    ;   write('Unknown direction. Use up/down/left/right.'),nl, player_turn
+    ).
+
+valid_direction(up).
+valid_direction(down).
+valid_direction(left).
+valid_direction(right).
+
+adjacent_room(Room, Direction, Adjacent) :-
+    rooms_grid(Grid),
+    locate_room(Grid, Room, Row, Col),
+    direction_delta(Direction, DRow, DCol),
+    Row1 is Row + DRow,
+    Col1 is Col + DCol,
+    within_grid(Grid, Row1, Col1),
+    nth1(Row1, Grid, RowList),
+    nth1(Col1, RowList, Adjacent).
+
+direction_delta(up, -1, 0).
+direction_delta(down, 1, 0).
+direction_delta(left, 0, -1).
+direction_delta(right, 0, 1).
+
+within_grid(Grid, Row, Col) :-
+    Row > 0,
+    Col > 0,
+    length(Grid, RowCount),
+    Row =< RowCount,
+    nth1(1, Grid, FirstRow),
+    length(FirstRow, ColCount),
+    Col =< ColCount.
+
+locate_room(Grid, Room, Row, Col) :-
+    nth1(Row, Grid, RowList),
+    nth1(Col, RowList, Room), !.
 
 wait :-
     alive(player),
