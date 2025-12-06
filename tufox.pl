@@ -65,6 +65,14 @@ path('Armory','Kitchen').
 path('Kitchen','Armory').
 path('Observatory','Storage').
 path('Storage','Observatory').
+path('Hall','Study').
+path('Study','Hall').
+path('Dining Room','Throne Room').
+path('Throne Room','Dining Room').
+path('Kitchen','Bathroom').
+path('Bathroom','Kitchen').
+path('Storage','Bedroom').
+path('Bedroom','Storage').
 path('Study','Chapel').
 path('Chapel','Study').
 path('Throne Room','Dungeon').
