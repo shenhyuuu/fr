@@ -7,11 +7,10 @@ swipl -s tufox.pl -g start
 ```
 
 The game launches automatically and prints the available commands:
-- `move(Room).` move between connected rooms
-- `perform(Task).` work on tasks in your current room
+- `move(Direction).` move up/down/left/right between connected rooms
+- `look.` describe your current room
+- `status.` inspect the current round, task progress, and cooldowns
 - `kill(Target).` eliminate a rabbit when in the same room (3-round cooldown)
-- `call_meeting.` trigger discussion and voting when you find a body
-- `status.` inspect current round, task progress, and cooldowns
 - `wait.` end your turn
 - `quit.` exit the session
 
