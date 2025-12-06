@@ -32,56 +32,6 @@ rooms_grid([
     ['Chapel','Dungeon','Wine Cellar','Balcony']
 ]).
 
-% bi-directional edges for the 4x4 grid map
-path('Tower','Library').
-path('Library','Tower').
-path('Library','Armory').
-path('Armory','Library').
-path('Armory','Observatory').
-path('Observatory','Armory').
-path('Hall','Dining Room').
-path('Dining Room','Hall').
-path('Dining Room','Kitchen').
-path('Kitchen','Dining Room').
-path('Kitchen','Storage').
-path('Storage','Kitchen').
-path('Study','Throne Room').
-path('Throne Room','Study').
-path('Throne Room','Bathroom').
-path('Bathroom','Throne Room').
-path('Bathroom','Bedroom').
-path('Bedroom','Bathroom').
-path('Chapel','Dungeon').
-path('Dungeon','Chapel').
-path('Dungeon','Wine Cellar').
-path('Wine Cellar','Dungeon').
-path('Wine Cellar','Balcony').
-path('Balcony','Wine Cellar').
-path('Tower','Hall').
-path('Hall','Tower').
-path('Library','Dining Room').
-path('Dining Room','Library').
-path('Armory','Kitchen').
-path('Kitchen','Armory').
-path('Observatory','Storage').
-path('Storage','Observatory').
-path('Hall','Study').
-path('Study','Hall').
-path('Dining Room','Throne Room').
-path('Throne Room','Dining Room').
-path('Kitchen','Bathroom').
-path('Bathroom','Kitchen').
-path('Storage','Bedroom').
-path('Bedroom','Storage').
-path('Study','Chapel').
-path('Chapel','Study').
-path('Throne Room','Dungeon').
-path('Dungeon','Throne Room').
-path('Bathroom','Wine Cellar').
-path('Wine Cellar','Bathroom').
-path('Bedroom','Balcony').
-path('Balcony','Bedroom').
-
 % task(TaskId, Room, NeededRounds, RemainingRounds, Status, Occupant)
 task_specs([
     spec(collect_food,4),
@@ -274,6 +224,10 @@ direction_delta(up, -1, 0).
 direction_delta(down, 1, 0).
 direction_delta(left, 0, -1).
 direction_delta(right, 0, 1).
+
+% adjacency derived from the grid layout
+path(Room, Adjacent) :-
+    adjacent_room(Room, _, Adjacent).
 
 within_grid(Grid, Row, Col) :-
     Row > 0,
