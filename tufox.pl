@@ -438,17 +438,32 @@ bfs_queue([(Node,D)|Rest], Visited, Goal, Dist) :-
 
 move_ai_toward(AI,TargetRoom) :-
     location(AI,Room),
-    (path(Room,TargetRoom) -> Next = TargetRoom ; find_path(Room,TargetRoom,[Room],Next)),
-    (nonvar(Next) -> (
+    (   Room == TargetRoom
+    ->  true
+    ;   next_step(Room,TargetRoom,Next),
         retract(location(AI,Room)),
         assertz(location(AI,Next)),
         visible_name(AI, VisibleAI),
         format('~w moves to ~w.~n',[VisibleAI,Next])
-    ) ; true).
+    ;   true
+    ).
 
-find_path(Start,Goal,Visited,Next) :-
-    path(Start,Mid), \+ member(Mid,Visited),
-    (Mid == Goal -> Next = Mid ; find_path(Mid,Goal,[Mid|Visited],Next)).
+next_step(Start,Goal,Next) :-
+    shortest_path_nodes(Start, Goal, Path),
+    Path = [Start,Next|_].
+
+shortest_path_nodes(Start, Goal, Path) :-
+    bfs_path([(Start,[Start])], [], Goal, RevPath),
+    reverse(RevPath, Path).
+
+bfs_path([(Node,Path)|_], _, Goal, Path) :- Node == Goal, !.
+bfs_path([(Node,Path)|Rest], Visited, Goal, ResultPath) :-
+    findall((Next,[Next|Path]),
+        ( path(Node,Next), \+ member(Next,Visited), \+ member(Next,Path)),
+        Nexts),
+    append(Rest, Nexts, Queue),
+    append(Visited, [Node], NewVisited),
+    bfs_path(Queue, NewVisited, Goal, ResultPath).
 
 resolve_meeting :-
     write('--- Meeting called ---'),nl,
