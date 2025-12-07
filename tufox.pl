@@ -366,7 +366,8 @@ ai_turns :-
     tick_world.
 
 record_round_logs :-
-    round_counter(R),
+    round_counter(R0),
+    R is R0 + 1,
     log_order(Order),
     forall(member(Char, Order), (alive(Char) -> log_character_state(Char, R) ; true)).
 
@@ -554,22 +555,48 @@ validate_statements :-
     forall((alive(AI), AI \= player), validate_against_logs(AI, Statements)).
 
 validate_against_logs(AI, Statements) :-
-    forall(member(stmt(Speaker,R,Room,Others), Statements), adjust_trust(AI, Speaker, R, Room, Others)).
+    visible_name(AI, VisibleAI),
+    format('~w正在校验发言:~n', [VisibleAI]),
+    forall(member(stmt(Speaker,R,Room,Others), Statements), adjust_trust(AI, Speaker, R, Room, Others)),
+    nl.
 
 adjust_trust(AI, Speaker, _, _, _) :- AI == Speaker, !.
 adjust_trust(AI, Speaker, Round, Room, Others) :-
+    trust(AI, Speaker, Current),
     ( log_entry(AI, Round, Room, Logged) ->
-        ( Logged == Others -> change_trust(AI, Speaker, 10)
-        ; change_trust(AI, Speaker, -10)
+        ( Logged == Others -> Delta = 10, Outcome = match
+        ; Delta = -10, Outcome = conflict
         )
-    ; true
-    ).
+    ; Delta = 0, Outcome = missing, Logged = none
+    ),
+    New is max(0, Current + Delta),
+    report_trust_evaluation(AI, Speaker, Round, Room, Others, Logged, Outcome, Current, New),
+    apply_trust_delta(AI, Speaker, Delta, Current, New).
 
-change_trust(AI, Target, Delta) :-
-    trust(AI, Target, Old),
-    New is max(0, Old + Delta),
+apply_trust_delta(_, _, 0, _, _) :- !.
+apply_trust_delta(AI, Target, _, Old, New) :-
     retract(trust(AI, Target, Old)),
     assertz(trust(AI, Target, New)).
+
+report_trust_evaluation(AI, Speaker, Round, Room, StatedOthers, Logged, Outcome, Current, New) :-
+    format_statement(Speaker, Round, Room, StatedOthers, StatementText),
+    visible_name(AI, VisibleAI),
+    visible_name(Speaker, VisibleSpeaker),
+    format_log_snapshot(Round, Room, Logged, LoggedText),
+    trust_outcome_text(Outcome, DeltaText),
+    format('  ~w的发言: ~w~n', [VisibleSpeaker, StatementText]),
+    format('  ~w的日志: ~w~n', [VisibleAI, LoggedText]),
+    format('  评估: ~w (信任 ~w -> ~w)~n', [DeltaText, Current, New]).
+
+format_log_snapshot(_, _, none, '无对应日志').
+format_log_snapshot(Round, Room, Others, Text) :-
+    display_names(Others, VisibleOthers),
+    atomic_list_concat(VisibleOthers, ',', OthersText),
+    format(string(Text), '第~w轮在~w看到~w', [Round, Room, OthersText]).
+
+trust_outcome_text(match, '记录匹配，信任+10').
+trust_outcome_text(conflict, '记录冲突，信任-10').
+trust_outcome_text(missing, '未记录，信任不变').
 
 run_votes :-
     retractall(vote(_,_)),
