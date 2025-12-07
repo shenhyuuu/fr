@@ -39,11 +39,11 @@ rooms_grid([
 
 % task(TaskId, Room, NeededRounds, RemainingRounds, Status, Occupant)
 task_specs([
-    spec(collect_food,4),
-    spec(fix_wiring,5),
-    spec(clean_vent,4),
-    spec(fix_chandelier,3),
-    spec('Organize Ancient Scrolls',2)
+    spec(collect_food,6),
+    spec(fix_wiring,7),
+    spec(clean_vent,6),
+    spec(fix_chandelier,5),
+    spec('Organize Ancient Scrolls',4)
 ]).
 
 assign_tasks_to_rooms :-
