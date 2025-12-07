@@ -80,7 +80,7 @@ start :-
     write('You are the fox. Eliminate rabbits until only one remains.'),nl,
     write('Rabbits win if tasks finish or the fox dies.'),nl,
     print_help,
-    look,
+    show_action_feedback,
     game_loop.
 
 print_help :-
@@ -269,6 +269,7 @@ kill(Target) :-
     ; write('No valid target here.'),nl, player_turn).
 
 player_done :-
+    show_action_feedback,
     ai_turns,
     game_loop.
 
@@ -308,6 +309,19 @@ visible_name(Char, Name) :-
 
 display_names(Chars, Names) :-
     maplist(visible_name, Chars, Names).
+
+show_action_feedback :-
+    print_other_characters_here,
+    display_map.
+
+print_other_characters_here :-
+    location(player, Room),
+    findall(C, (location(C,Room), alive(C), C \= player), Others),
+    display_names(Others, VisibleOthers),
+    (   VisibleOthers = []
+    ->  write('No other characters here.'), nl
+    ;   format('Other characters here: ~w~n', [VisibleOthers])
+    ).
 
 resolve_target(Input, Target) :-
     (alias(Target, Input) -> true ; Target = Input).
