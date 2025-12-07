@@ -17,6 +17,10 @@
 :- dynamic revealed_fox/1.
 :- dynamic vote/2.
 :- dynamic alias/2.
+:- dynamic trust/3.
+:- dynamic log_entry/4.
+:- dynamic spoken_log/3.
+:- dynamic history_statement/4.
 
 rooms([
     'Tower','Library','Armory','Observatory',
@@ -99,14 +103,23 @@ reset_world :-
     retractall(revealed_fox(_)),
     retractall(vote(_,_)),
     retractall(alias(_,_)),
+    retractall(trust(_,_,_)),
+    retractall(log_entry(_,_,_,_)),
+    retractall(spoken_log(_,_,_)),
+    retractall(history_statement(_,_,_,_)),
     assign_tasks_to_rooms,
     forall(characters(Cs), (forall(member(C,Cs), assertz(alive(C))))),
     assign_aliases,
     assign_initial_locations,
+    initialize_trust,
     assertz(cooldown(player,kill,0)),
     assertz(cooldown(detective,inspect,2)),
     assertz(next_meeting(3)),
     assertz(round_counter(0)).
+
+initialize_trust :-
+    characters(Chars),
+    forall((member(A, Chars), member(B, Chars), A \= B), assertz(trust(A,B,100))).
 
 assign_aliases :-
     characters(Chars),
@@ -348,7 +361,32 @@ tasks_remaining(Rem) :-
 ai_turns :-
     alive_rabbits(Rs),
     forall(member(AI, Rs), ai_act(AI)),
+    record_round_logs,
     tick_world.
+
+record_round_logs :-
+    round_counter(R),
+    log_order(Order),
+    forall(member(Char, Order), (alive(Char) -> log_character_state(Char, R) ; true)).
+
+log_order(Order) :-
+    characters(All),
+    exclude(=(player), All, NonPlayer),
+    append(NonPlayer, [player], Order).
+
+log_character_state(Char, Round) :-
+    location(Char, Room),
+    findall(O, (location(O, Room), alive(O)), Others0),
+    sort(Others0, Others),
+    update_room_logs(Round, Room, Others),
+    retractall(log_entry(Char, Round, Room, _)),
+    assertz(log_entry(Char, Round, Room, Others)).
+
+update_room_logs(Round, Room, Others) :-
+    forall(log_entry(Other, Round, Room, _), (
+        retract(log_entry(Other, Round, Room, _)),
+        assertz(log_entry(Other, Round, Room, Others))
+    )).
 
 ai_act(AI) :- % dispatch for every AI agent
     ai_act_logic(AI).
@@ -468,10 +506,69 @@ bfs_path([(Node,Path)|Rest], Visited, Goal, ResultPath) :-
 resolve_meeting :-
     write('--- Meeting called ---'),nl,
     clear_bodies,
+    discussion_phase,
+    validate_statements,
     run_votes,
     update_meeting_timer,
     clear_bodies,
     !.
+
+discussion_phase :-
+    write('--- Discussion phase ---'),nl,
+    findall(Char, alive(Char), Speakers),
+    forall(member(Char, Speakers), speak_from_log(Char)).
+
+speak_from_log(player) :-
+    findall(entry(R,Room,Others), (log_entry(player,R,Room,Others), \+ spoken_log(player,R,Room)), Entries),
+    exclude(conflicts_with_history, Entries, SafeEntries),
+    (SafeEntries = [] -> write('You stay silent to avoid conflicts.'),nl
+    ; random_member(entry(R,Room,Others), SafeEntries),
+      register_statement(player, R, Room, Others)
+    ).
+speak_from_log(Char) :-
+    findall(entry(R,Room,Others), (log_entry(Char,R,Room,Others), \+ spoken_log(Char,R,Room)), Entries),
+    (Entries = [] -> true
+    ; random_member(entry(R,Room,Others), Entries),
+      register_statement(Char, R, Room, Others)
+    ).
+
+conflicts_with_history(entry(R,Room,Others)) :-
+    history_statement(_, R, Room, PrevOthers),
+    PrevOthers \= Others.
+
+register_statement(Char, Round, Room, Others) :-
+    assertz(spoken_log(Char, Round, Room)),
+    assertz(history_statement(Char, Round, Room, Others)),
+    format_statement(Char, Round, Room, Others, Text),
+    format('~w~n', [Text]).
+
+format_statement(Char, Round, Room, Others, Text) :-
+    visible_name(Char, VisibleChar),
+    display_names(Others, VisibleOthers),
+    atomic_list_concat(VisibleOthers, ',', OthersText),
+    format(string(Text), '~w在第~w轮在~w，该地方有~w。', [VisibleChar, Round, Room, OthersText]).
+
+validate_statements :-
+    findall(stmt(Speaker,R,Room,Others), history_statement(Speaker,R,Room,Others), Statements),
+    forall((alive(AI), AI \= player), validate_against_logs(AI, Statements)).
+
+validate_against_logs(AI, Statements) :-
+    forall(member(stmt(Speaker,R,Room,Others), Statements), adjust_trust(AI, Speaker, R, Room, Others)).
+
+adjust_trust(AI, Speaker, _, _, _) :- AI == Speaker, !.
+adjust_trust(AI, Speaker, Round, Room, Others) :-
+    ( log_entry(AI, Round, Room, Logged) ->
+        ( Logged == Others -> change_trust(AI, Speaker, 10)
+        ; change_trust(AI, Speaker, -10)
+        )
+    ; true
+    ).
+
+change_trust(AI, Target, Delta) :-
+    trust(AI, Target, Old),
+    New is max(0, Old + Delta),
+    retract(trust(AI, Target, Old)),
+    assertz(trust(AI, Target, New)).
 
 run_votes :-
     retractall(vote(_,_)),
@@ -492,8 +589,8 @@ ai_single_vote(AI) :-
     alive_targets_for_vote(AI, Candidates),
     (AI == detective ->
         (revealed_fox(Fox), alive(Fox) -> Vote = Fox
-        ; random_vote(Candidates, Vote))
-    ; random_vote(Candidates, Vote)
+        ; select_vote_by_trust(AI, Candidates, Vote))
+    ; select_vote_by_trust(AI, Candidates, Vote)
     ),
     assertz(vote(AI, Vote)),
     visible_name(AI, VisibleAI),
@@ -506,6 +603,18 @@ alive_targets_for_vote(AI, Candidates) :-
 random_vote(Candidates, Vote) :-
     Candidates \= [],
     random_member(Vote, Candidates).
+
+select_vote_by_trust(AI, Candidates, Vote) :-
+    findall(score(T,Score), (member(T, Candidates), trust(AI, T, Score)), Scores),
+    (   Scores = []
+    ->  random_vote(Candidates, Vote)
+    ;   findall(Sc, member(score(_,Sc), Scores), AllScores),
+        min_list(AllScores, Min),
+        include(matches_score(Min), Scores, Lowest),
+        random_member(score(Vote,_), Lowest)
+    ).
+
+matches_score(Min, score(_,Score)) :- Score =:= Min.
 
 tally_votes :-
     findall(Target, vote(_,Target), Targets),
