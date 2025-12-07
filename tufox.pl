@@ -5,6 +5,7 @@
 :- use_module(library(random)).
 :- use_module(library(apply)).
 :- use_module(library(lists)).
+:- use_module(pyperplan_runner).
 
 :- dynamic location/2.
 :- dynamic alive/1.
@@ -329,7 +330,8 @@ game_loop :-
     ).
 
 check_victory :-
-    (\+ alive(player) -> rabbits_win, true
+    ( inspected(player) -> rabbits_win, true
+    ; \+ alive(player) -> rabbits_win, true
     ; alive_rabbits(List), length(List,L), (L =< 1 -> fox_win, true ;
         tasks_remaining(Rem), (Rem =< 0 -> rabbits_win, true ; fail))).
 
@@ -407,7 +409,8 @@ inspect_identity(Target) :-
     % Meeting mechanics disabled; revealing a fox no longer triggers a meeting.
     true,
     visible_name(Target, VisibleTarget),
-    format('An inspection reveals ~w is ~w.~n',[VisibleTarget,Role]).
+    format('An inspection reveals ~w is ~w.~n',[VisibleTarget,Role]),
+    (Target == player -> rabbits_win, halt ; true).
 
 attempt_task(AI) :-
     (choose_task(AI, TargetTask, TargetRoom) ->
@@ -849,7 +852,7 @@ execute_plan_step(detective) :-
     (Plan = [Action|_] -> apply_action(detective, Action) ; true).
 
 plan_for_detective(Plan) :-
-    (run_pyperplan(Plan) -> true ; default_plan(Plan)).
+    ( build_detective_plan(Plan) -> true ; default_plan(Plan)).
 
 default_plan([
     move(detective,'Hall'),
@@ -857,41 +860,171 @@ default_plan([
     inspect(player)
 ]).
 
-apply_action(_,move(detective,Room)) :-
+apply_action(_, move(detective,Room)) :-
     move_ai_toward(detective,Room).
-apply_action(_,inspect(Target)) :-
+apply_action(_, move(_,_,Room)) :-
+    move_ai_toward(detective,Room).
+apply_action(_, inspect(Target)) :-
     inspect_identity(Target).
+apply_action(_, inspect(_,Target,_)) :-
+    inspect_identity(Target).
+apply_action(_, none).
 
-run_pyperplan(Plan) :-
-    catch(shell('python3 -m pyperplan adversary_domain.pddl adversary_problem.pddl > plan.txt'),_,fail),
-    (exists_file('plan.txt') -> read_plan_file('plan.txt',Plan) ; fail).
+build_detective_plan(Plan) :-
+    generate_detective_problem(ProblemFile),
+    absolute_file_name('adversary_domain.pddl', DomainFile, [access(read)]),
+    pyperplan_executable(Exe),
+    catch(run_pyperplan_soln(Exe, DomainFile, ProblemFile, RawActions), _, fail),
+    maplist(convert_plan_action, RawActions, Converted),
+    exclude(=(none), Converted, Plan),
+    Plan \= [],
+    cleanup_plan_artifacts(ProblemFile).
+build_detective_plan(_) :-
+    cleanup_plan_artifacts(_),
+    fail.
 
-read_plan_file(File, Plan) :-
-    open(File,read,Stream),
-    read_lines(Stream, Lines),
-    close(Stream),
-    maplist(parse_action, Lines, Plan).
+pyperplan_executable(Exe) :-
+    (current_prolog_flag(windows, true) -> Exe = 'pyperplan.exe' ; Exe = 'python3').
 
-read_lines(Stream, []) :- at_end_of_stream(Stream), !.
-read_lines(Stream, [L|Ls]) :-
-    read_line_to_codes(Stream, Codes), atom_codes(A,Codes), atom_string(A,S), normalize_space(string(L),S),
-    read_lines(Stream, Ls).
+convert_plan_action(move(_,_,To), move(detective,Room)) :-
+    resolve_room_token(To, Room), !.
+convert_plan_action(move(_,To), move(detective,Room)) :-
+    resolve_room_token(To, Room), !.
+convert_plan_action(inspect(_,Target,_), inspect(Agent)) :-
+    resolve_agent_token(Target, Agent), !.
+convert_plan_action(inspect(Target), inspect(Agent)) :-
+    resolve_agent_token(Target, Agent), !.
+convert_plan_action(_, none).
 
-parse_action(Line, move(detective,Room)) :-
-    sub_atom(Line,_,_,_, 'move'),
-    atomic_list_concat(['(', 'move', detective, RoomAtom, ')' ], ' ', Line),
-    room_from_plan_atom(RoomAtom, Room).
-parse_action(_, inspect(player)).
-
-room_from_plan_atom(RoomAtom, Room) :-
-    atom_string(RoomAtom, PlanString),
-    normalize_token(PlanString, NormalizedPlan),
+resolve_room_token(Token, Room) :-
+    normalize_token_atom(Token, Normalized),
     rooms(Rooms),
     member(Room, Rooms),
-    atom_string(Room, RoomString),
-    normalize_token(RoomString, NormalizedPlan), !.
+    atom_string(Room, RoomStr),
+    normalize_token(RoomStr, Normalized), !.
+
+resolve_agent_token(Token, Agent) :-
+    normalize_token_atom(Token, Normalized),
+    characters(Agents),
+    member(Agent, Agents),
+    atom_string(Agent, AgentStr),
+    normalize_token(AgentStr, Normalized), !.
+
+normalize_token_atom(Token, Normalized) :-
+    atom_string(Token, Str),
+    normalize_token(Str, Normalized).
 
 normalize_token(Str, Normalized) :-
     string_lower(Str, Lower),
     split_string(Lower, " _", " _", Parts),
     atomic_list_concat(Parts, '', Normalized).
+
+generate_detective_problem(ProblemFile) :-
+    tmp_file_stream(text, ProblemFile, Stream),
+    gather_agents(Agents),
+    gather_rooms(Rooms),
+    findall(conn(A,B), path(A,B), Connections0),
+    sort(Connections0, Connections),
+    detective_init(DetectiveAt),
+    agents_init(Agents, AgentInit),
+    inspected_init(InspectedFacts),
+    goal_inspections(Agents, Goals),
+    format(Stream, "(define (problem tufox-instance)~n  (:domain tufox)~n  (:objects~n", []),
+    write_agent_objects(Stream, Agents),
+    write_room_objects(Stream, Rooms),
+    format(Stream, "  )~n  (:init~n", []),
+    write_alive(Stream, Agents),
+    write_at(Stream, DetectiveAt, AgentInit),
+    write_connections(Stream, Connections),
+    write_inspected(Stream, InspectedFacts),
+    format(Stream, "    (fox player)~n  )~n", []),
+    write_goals(Stream, Goals),
+    format(Stream, ")~n", []),
+    close(Stream).
+
+cleanup_plan_artifacts(ProblemFile) :-
+    (var(ProblemFile) -> true ; (exists_file(ProblemFile) -> delete_file(ProblemFile) ; true)),
+    (var(ProblemFile) -> SolnFile = _ ; problem_soln_file(ProblemFile, SolnFile)),
+    (nonvar(SolnFile), exists_file(SolnFile) -> delete_file(SolnFile) ; true).
+
+gather_agents(Agents) :-
+    findall(A, (alive(A), A \= detective), Others),
+    append([detective], Others, Agents).
+
+gather_rooms(Rooms) :-
+    rooms(Raw),
+    maplist(pddl_atom, Raw, Rooms).
+
+detective_init(at(detective, Room)) :-
+    location(detective, Room).
+
+agents_init([], []).
+agents_init([detective|Rest], Facts) :-
+    agents_init(Rest, Facts).
+agents_init([Agent|Rest], [at(Agent, Room)|Facts]) :-
+    location(Agent, Room),
+    agents_init(Rest, Facts).
+
+inspected_init(InspectedFacts) :-
+    findall(inspected(A), inspected(A), InspectedFacts).
+
+goal_inspections(Agents, Goals) :-
+    exclude(=(detective), Agents, Targets),
+    maplist(goal_inspected, Targets, Goals).
+
+goal_inspected(Agent, inspected(Agent)).
+
+write_agent_objects(Stream, Agents) :-
+    maplist(pddl_atom, Agents, Tokens),
+    atomic_list_concat(Tokens, ' ', Line),
+    format(Stream, "    ~w - agent~n", [Line]).
+
+write_room_objects(Stream, Rooms) :-
+    atomic_list_concat(Rooms, ' ', Line),
+    format(Stream, "    ~w - room~n", [Line]).
+
+write_alive(Stream, Agents) :-
+    forall(member(A, Agents), (pddl_atom(A, Token), format(Stream, "    (alive ~w)~n", [Token]))).
+
+write_at(Stream, at(Detective, DetRoom), AgentInit) :-
+    pddl_atom(Detective, DTok),
+    pddl_atom(DetRoom, DRTok),
+    format(Stream, "    (at ~w ~w)~n", [DTok, DRTok]),
+    forall(member(at(Agent, Room), AgentInit), (
+        pddl_atom(Agent, ATok),
+        pddl_atom(Room, RTok),
+        format(Stream, "    (at ~w ~w)~n", [ATok, RTok])
+    )).
+
+write_connections(Stream, Connections) :-
+    forall(member(conn(A,B), Connections), (
+        pddl_atom(A, ATok),
+        pddl_atom(B, BTok),
+        format(Stream, "    (connected ~w ~w)~n", [ATok, BTok])
+    )).
+
+write_inspected(Stream, Facts) :-
+    forall(member(inspected(A), Facts), (
+        pddl_atom(A, Tok),
+        format(Stream, "    (inspected ~w)~n", [Tok])
+    )).
+
+write_goals(Stream, Goals) :-
+    format(Stream, "  (:goal (and~n", []),
+    forall(member(inspected(A), Goals), (
+        pddl_atom(A, Tok),
+        format(Stream, "    (inspected ~w)~n", [Tok])
+    )),
+    format(Stream, "  ))~n", []).
+
+problem_soln_file(ProblemFile, SolnFile) :-
+    atom_string(ProblemFile, PStr),
+    string_concat(PStr, '.soln', SStr),
+    atom_string(SolnFile, SStr).
+
+pddl_atom(Source, Token) :-
+    atom(Source),
+    atom_string(Source, Str),
+    normalize_token(Str, Lower),
+    split_string(Lower, " ", " ", Parts),
+    atomic_list_concat(Parts, '_', Token).
