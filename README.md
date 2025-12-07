@@ -20,4 +20,4 @@ The game launches automatically and prints the available commands:
 - `adversary_domain.pddl` – STRIPS domain describing movement and identity inspection for the detective.
 - `adversary_problem.pddl` – default problem instance used by the detective plan.
 
-If `pyperplan` is available in your environment, the detective attempts to build a plan from the PDDL files. Otherwise, a built-in fallback plan is executed.
+If `pyperplan` is available in your environment, the detective dynamically generates a PDDL problem from the current board (rooms, alive agents, and their coordinates) and asks the external planner for the shortest route that inspects every agent; discovering the player immediately ends the game in a rabbit victory. Otherwise, a built-in fallback plan is executed.
