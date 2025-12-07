@@ -524,8 +524,13 @@ speak_from_log(player) :-
     findall(entry(R,Room,Others), (log_entry(player,R,Room,Others), \+ spoken_log(player,R,Room)), Entries),
     exclude(conflicts_with_history, Entries, SafeEntries),
     (SafeEntries = [] -> write('You stay silent to avoid conflicts.'),nl
-    ; random_member(entry(R,Room,Others), SafeEntries),
-      register_statement(player, R, Room, Others)
+    ; present_log_choices(SafeEntries, Choice),
+      (   Choice == 0
+      ->  write('你选择保持沉默。'), nl
+      ;   nth1(Choice, SafeEntries, entry(R,Room,Others))
+      ->  register_statement(player, R, Room, Others)
+      ;   write('无效选择，保持沉默。'), nl
+      )
     ).
 speak_from_log(Char) :-
     findall(entry(R,Room,Others), (log_entry(Char,R,Room,Others), \+ spoken_log(Char,R,Room)), Entries),
@@ -533,6 +538,18 @@ speak_from_log(Char) :-
     ; random_member(entry(R,Room,Others), Entries),
       register_statement(Char, R, Room, Others)
     ).
+
+present_log_choices(Entries, Choice) :-
+    write('请选择一条日志发言 (输入编号后跟句点，0保持沉默):'), nl,
+    print_log_options(Entries, 1),
+    read(Choice).
+
+print_log_options([], _).
+print_log_options([entry(Round, Room, Others)|Rest], Index) :-
+    format_log_snapshot(Round, Room, Others, Text),
+    format('~w. ~w~n', [Index, Text]),
+    Next is Index + 1,
+    print_log_options(Rest, Next).
 
 conflicts_with_history(entry(R,Room,Others)) :-
     history_statement(_, R, Room, PrevOthers),
@@ -616,10 +633,31 @@ ai_votes :-
 ai_single_vote(AI) :-
     alive_targets_for_vote(AI, Candidates),
     (AI == detective ->
-        (revealed_fox(Fox), alive(Fox) -> Vote = Fox
-        ; select_vote_by_trust(AI, Candidates, Vote))
-    ; select_vote_by_trust(AI, Candidates, Vote)
-    ),
+        (revealed_fox(Fox), alive(Fox) -> record_vote(AI, Fox)
+        ; select_vote_by_trust(AI, Candidates, Vote), record_vote(AI, Vote))
+    ; role(AI, rabbit) -> rabbit_vote(AI, Candidates)
+    ; select_vote_by_trust(AI, Candidates, Vote), record_vote(AI, Vote)
+    ).
+
+rabbit_vote(AI, Candidates) :-
+    rabbit_lowest_trust_targets(AI, Candidates, Lowest),
+    (   Lowest = [Vote]
+    ->  record_vote(AI, Vote)
+    ;   visible_name(AI, VisibleAI),
+        format('~w弃权。~n', [VisibleAI])
+    ).
+
+rabbit_lowest_trust_targets(AI, Candidates, LowestTargets) :-
+    findall(score(T,Score), (member(T, Candidates), trust(AI, T, Score)), Scores),
+    (   Scores = []
+    ->  LowestTargets = []
+    ;   findall(Sc, member(score(_,Sc), Scores), AllScores),
+        min_list(AllScores, Min),
+        include(matches_score(Min), Scores, LowestScores),
+        findall(T, member(score(T,_), LowestScores), LowestTargets)
+    ).
+
+record_vote(AI, Vote) :-
     assertz(vote(AI, Vote)),
     visible_name(AI, VisibleAI),
     visible_name(Vote, VisibleVote),
@@ -648,8 +686,17 @@ tally_votes :-
     findall(Target, vote(_,Target), Targets),
     count_targets(Targets,Counts),
     (Counts = [] -> write('No votes.'),nl ;
-        keysort(Counts,Sorted), reverse(Sorted, [_-Target|_]),
-        eliminate(Target)).
+        keysort(Counts,Sorted), reverse(Sorted, [Count-Target|_]),
+        vote_threshold(Threshold),
+        (   Count >= Threshold
+        ->  eliminate(Target)
+        ;   format('投票未通过，需要至少~w票。~n', [Threshold])
+        )).
+
+vote_threshold(Threshold) :-
+    findall(Char, alive(Char), Alive),
+    length(Alive, AliveCount),
+    Threshold is (AliveCount + 1) // 2.
 
 count_targets([],[]).
 count_targets([H|T], Counts) :-
