@@ -641,14 +641,15 @@ ai_single_vote(AI) :-
 
 rabbit_vote(AI, Candidates) :-
     rabbit_lowest_trust_targets(AI, Candidates, Lowest),
-    (   Lowest = [Vote]
-    ->  record_vote(AI, Vote)
+    (   unique_lowest_target(Lowest)
+    ->  Lowest = [Vote],
+        record_vote(AI, Vote)
     ;   visible_name(AI, VisibleAI),
         format('~w弃权。~n', [VisibleAI])
     ).
 
 rabbit_lowest_trust_targets(AI, Candidates, LowestTargets) :-
-    findall(score(T,Score), (member(T, Candidates), trust(AI, T, Score)), Scores),
+    findall(score(T,Score), (member(T, Candidates), (trust(AI, T, Score) -> true ; Score = 100)), Scores),
     (   Scores = []
     ->  LowestTargets = []
     ;   findall(Sc, member(score(_,Sc), Scores), AllScores),
@@ -656,6 +657,11 @@ rabbit_lowest_trust_targets(AI, Candidates, LowestTargets) :-
         include(matches_score(Min), Scores, LowestScores),
         findall(T, member(score(T,_), LowestScores), LowestTargets)
     ).
+
+unique_lowest_target([_]) :- !.
+unique_lowest_target(LowestTargets) :-
+    length(LowestTargets, Count),
+    Count =:= 1.
 
 record_vote(AI, Vote) :-
     assertz(vote(AI, Vote)),
