@@ -920,27 +920,31 @@ normalize_token(Str, Normalized) :-
     atomic_list_concat(Parts, '', Normalized).
 
 generate_detective_problem(ProblemFile) :-
-    tmp_file_stream(text, ProblemFile, Stream),
-    gather_agents(Agents),
-    gather_rooms(Rooms),
-    findall(conn(A,B), path(A,B), Connections0),
-    sort(Connections0, Connections),
-    detective_init(DetectiveAt),
-    agents_init(Agents, AgentInit),
-    inspected_init(InspectedFacts),
-    goal_inspections(Agents, Goals),
-    format(Stream, "(define (problem tufox-instance)~n  (:domain tufox)~n  (:objects~n", []),
-    write_agent_objects(Stream, Agents),
-    write_room_objects(Stream, Rooms),
-    format(Stream, "  )~n  (:init~n", []),
-    write_alive(Stream, Agents),
-    write_at(Stream, DetectiveAt, AgentInit),
-    write_connections(Stream, Connections),
-    write_inspected(Stream, InspectedFacts),
-    format(Stream, "    (fox player)~n  )~n", []),
-    write_goals(Stream, Goals),
-    format(Stream, ")~n", []),
-    close(Stream).
+    setup_call_cleanup(
+        tmp_file_stream(text, ProblemFile, Stream),
+        (
+            gather_agents(Agents),
+            gather_rooms(Rooms),
+            findall(conn(A,B), path(A,B), Connections0),
+            sort(Connections0, Connections),
+            detective_init(DetectiveAt),
+            agents_init(Agents, AgentInit),
+            inspected_init(InspectedFacts),
+            goal_inspections(Agents, Goals),
+            format(Stream, "(define (problem tufox-instance)~n  (:domain tufox)~n  (:objects~n", []),
+            write_agent_objects(Stream, Agents),
+            write_room_objects(Stream, Rooms),
+            format(Stream, "  )~n  (:init~n", []),
+            write_alive(Stream, Agents),
+            write_at(Stream, DetectiveAt, AgentInit),
+            write_connections(Stream, Connections),
+            write_inspected(Stream, InspectedFacts),
+            format(Stream, "    (fox player)~n  )~n", []),
+            write_goals(Stream, Goals),
+            format(Stream, ")~n", [])
+        ),
+        close(Stream)
+    ).
 
 cleanup_plan_artifacts(ProblemFile) :-
     (var(ProblemFile) -> true ; (exists_file(ProblemFile) -> delete_file(ProblemFile) ; true)),
