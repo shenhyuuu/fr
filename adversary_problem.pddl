@@ -10,8 +10,18 @@
   (:init
     (alive detective)
     (alive player)
+    (alive bunny1)
+    (alive bunny2)
+    (alive bunny3)
+    (alive bunny4)
+
     (at detective balcony)
     (at player kitchen)
+    (at bunny1 tower)
+    (at bunny2 study)
+    (at bunny3 throne_room)
+    (at bunny4 chapel)
+
     (connected tower library)
     (connected library tower)
     (connected library armory)
@@ -52,6 +62,7 @@
     (connected wine_cellar bathroom)
     (connected bedroom balcony)
     (connected balcony bedroom)
+
     (fox player)
   )
   (:goal (inspected player))
