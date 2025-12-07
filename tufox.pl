@@ -13,12 +13,12 @@
 :- dynamic cooldown/3.
 :- dynamic inspected/1.
 :- dynamic body/2.
-:- dynamic next_meeting/1.
+%:- dynamic next_meeting/1.
 :- dynamic round_counter/1.
-:- dynamic revealed_fox/1.
-:- dynamic vote/2.
+%:- dynamic revealed_fox/1.
+%:- dynamic vote/2.
 :- dynamic alias/2.
-:- dynamic trust/3.
+%:- dynamic trust/3.
 :- dynamic log_entry/4.
 :- dynamic spoken_log/3.
 :- dynamic history_statement/4.
@@ -99,12 +99,8 @@ reset_world :-
     retractall(cooldown(_,_,_)),
     retractall(inspected(_)),
     retractall(body(_,_)),
-    retractall(next_meeting(_)),
     retractall(round_counter(_)),
-    retractall(revealed_fox(_)),
-    retractall(vote(_,_)),
     retractall(alias(_,_)),
-    retractall(trust(_,_,_)),
     retractall(log_entry(_,_,_,_)),
     retractall(spoken_log(_,_,_)),
     retractall(history_statement(_,_,_,_)),
@@ -112,15 +108,13 @@ reset_world :-
     forall(characters(Cs), (forall(member(C,Cs), assertz(alive(C))))),
     assign_aliases,
     assign_initial_locations,
-    initialize_trust,
     assertz(cooldown(player,kill,0)),
     assertz(cooldown(detective,inspect,2)),
-    assertz(next_meeting(3)),
     assertz(round_counter(0)).
 
-initialize_trust :-
-    characters(Chars),
-    forall((member(A, Chars), member(B, Chars), A \= B), assertz(trust(A,B,100))).
+% initialize_trust :-
+%     characters(Chars),
+%     forall((member(A, Chars), member(B, Chars), A \= B), assertz(trust(A,B,100))).
 
 assign_aliases :-
     characters(Chars),
@@ -325,18 +319,12 @@ progress_task(Task,Room,Actor) :-
         format('Task ~w completed!~n',[Task])
     ) ; assertz(task(Task,Room,Need,NewR,in_progress,Actor))).
 
-check_bodies(Room) :-
-    (   body(Room,_)
-    ->  write('You spot a body here! A meeting will be triggered.'),nl,
-        resolve_meeting
-    ;   true
-    ).
+check_bodies(_Room) :-
+    % Meeting mechanics are disabled; bodies no longer trigger discussions.
+    true.
 
 game_loop :-
     (check_victory -> true ;
-        round_counter(R),
-        next_meeting(NM),
-        (R >= NM -> resolve_meeting ; true),
         (alive(player) -> player_turn ; (ai_turns, game_loop))
     ).
 
@@ -398,30 +386,26 @@ ai_act_logic(AI) :-
 
 ai_act_logic(detective) :-
     location(detective,Room),
-    ( body(Room,_) ->
-        resolve_meeting
-    ; ( cooldown(detective,inspect,CD),
-        CD =:= 0,
-        findall(T, (location(T,Room), alive(T), T \= detective, \+ inspected(T)), Targets),
-        Targets \= [] ->
-            Targets = [Target|_],
-            inspect_identity(Target)
-      ; execute_plan_step(detective)
-      )
+    ( cooldown(detective,inspect,CD),
+      CD =:= 0,
+      findall(T, (location(T,Room), alive(T), T \= detective, \+ inspected(T)), Targets),
+      Targets \= [] ->
+        Targets = [Target|_],
+        inspect_identity(Target)
+    ; execute_plan_step(detective)
     ).
 
 ai_act_logic(AI) :-
-    location(AI,Room),
-    (body(Room,_) ->
-        resolve_meeting
-    ; attempt_task(AI)).
+    location(AI,_Room),
+    attempt_task(AI).
 
 inspect_identity(Target) :-
     role(Target, Role),
     assertz(inspected(Target)),
     retract(cooldown(detective,inspect,_)),
     assertz(cooldown(detective,inspect,2)),
-    (Role == fox -> assertz(revealed_fox(Target)), resolve_meeting ; true),
+    % Meeting mechanics disabled; revealing a fox no longer triggers a meeting.
+    true,
     visible_name(Target, VisibleTarget),
     format('An inspection reveals ~w is ~w.~n',[VisibleTarget,Role]).
 
@@ -504,6 +488,8 @@ bfs_path([(Node,Path)|Rest], Visited, Goal, ResultPath) :-
     append(Rest, Nexts, Queue),
     append(Visited, [Node], NewVisited),
     bfs_path(Queue, NewVisited, Goal, ResultPath).
+
+/* Meeting, voting, and trust mechanics are temporarily disabled.
 
 resolve_meeting :-
     write('--- Meeting called ---'),nl,
@@ -727,6 +713,7 @@ update_meeting_timer :-
 
 clear_bodies :-
     retractall(body(_,_)).
+*/
 
 % world tick: cooldown reductions and task progress persistence
 
