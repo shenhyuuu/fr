@@ -16,7 +16,7 @@ The game launches automatically and prints the available commands:
 - `quit.` exit the session
 
 ## Files
-- `tufox.pl` – main game logic, knowledge base, AI turns, meeting system, and planner integration.
+- `tufox.pl` – main game logic, knowledge base, AI turns, meeting system, and planner integration. Meetings now use a planning-based “反事实计划投票制” that compares whether suspects can explain recent rounds when acting as the lone fox versus an innocent rabbit, with detective evidence nudging costs rather than hard reveals.
 - `adversary_domain.pddl` – STRIPS domain describing movement and identity inspection for the detective.
 - `adversary_problem.pddl` – default problem instance used by the detective plan.
 

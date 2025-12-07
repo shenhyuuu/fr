@@ -17,6 +17,8 @@
 :- dynamic revealed_fox/1.
 :- dynamic vote/2.
 :- dynamic alias/2.
+:- dynamic round_fact/2.
+:- dynamic evidence/3.
 
 rooms([
     'Tower','Library','Armory','Observatory',
@@ -34,11 +36,11 @@ rooms_grid([
 
 % task(TaskId, Room, NeededRounds, RemainingRounds, Status, Occupant)
 task_specs([
-    spec(collect_food,4),
-    spec(fix_wiring,5),
-    spec(clean_vent,4),
-    spec(fix_chandelier,3),
-    spec('Organize Ancient Scrolls',2)
+    spec(collect_food,6),
+    spec(fix_wiring,7),
+    spec(clean_vent,6),
+    spec(fix_chandelier,5),
+    spec('Organize Ancient Scrolls',4)
 ]).
 
 assign_tasks_to_rooms :-
@@ -99,13 +101,15 @@ reset_world :-
     retractall(revealed_fox(_)),
     retractall(vote(_,_)),
     retractall(alias(_,_)),
+    retractall(round_fact(_,_)),
+    retractall(evidence(_,_,_)),
     assign_tasks_to_rooms,
     forall(characters(Cs), (forall(member(C,Cs), assertz(alive(C))))),
     assign_aliases,
     assign_initial_locations,
     assertz(cooldown(player,kill,0)),
-    assertz(cooldown(detective,inspect,2)),
-    assertz(next_meeting(3)),
+    assertz(cooldown(detective,inspect,4)),
+    assertz(next_meeting(4)),
     assertz(round_counter(0)).
 
 assign_aliases :-
@@ -251,6 +255,8 @@ kill(Target) :-
       location(player,Room), location(Resolved,Room), alive(Resolved), Resolved \= player ->
         retract(alive(Resolved)),
         release_tasks_for(Resolved),
+        round_counter(R),
+        assertz(round_fact(R, killed(player, Resolved, Room))),
         assertz(body(Room,Resolved)),
         retract(cooldown(player,kill,_)),
         assertz(cooldown(player,kill,3)),
@@ -308,13 +314,15 @@ progress_task(Task,Room,Actor) :-
     NewR is Remaining - 1,
     (NewR =< 0 -> (
         assertz(task(Task,Room,Need,0,complete,none)),
+        round_counter(R),
+        assertz(round_fact(R, task_done(Task, Room))),
         format('Task ~w completed!~n',[Task])
     ) ; assertz(task(Task,Room,Need,NewR,in_progress,Actor))).
 
 check_bodies(Room) :-
     (   body(Room,_)
     ->  write('You spot a body here! A meeting will be triggered.'),nl,
-        resolve_meeting
+        (meeting_ready -> resolve_meeting ; true)
     ;   true
     ).
 
@@ -359,7 +367,7 @@ ai_act_logic(AI) :-
 ai_act_logic(detective) :-
     location(detective,Room),
     ( body(Room,_) ->
-        resolve_meeting
+        (meeting_ready -> resolve_meeting ; true)
     ; ( cooldown(detective,inspect,CD),
         CD =:= 0,
         findall(T, (location(T,Room), alive(T), T \= detective, \+ inspected(T)), Targets),
@@ -380,10 +388,21 @@ inspect_identity(Target) :-
     role(Target, Role),
     assertz(inspected(Target)),
     retract(cooldown(detective,inspect,_)),
-    assertz(cooldown(detective,inspect,2)),
-    (Role == fox -> assertz(revealed_fox(Target)), resolve_meeting ; true),
+    assertz(cooldown(detective,inspect,4)),
+    inspection_strength(Role, Strength),
+    assertz(evidence(detective, Target, Strength)),
     visible_name(Target, VisibleTarget),
-    format('An inspection reveals ~w is ~w.~n',[VisibleTarget,Role]).
+    format('Investigation yields a ~w clue about ~w.~n',[Strength,VisibleTarget]),
+    ( Strength == strong,
+      meeting_ready -> resolve_meeting ; true).
+
+inspection_strength(fox, strong).
+inspection_strength(_, weak).
+
+meeting_ready :-
+    round_counter(R),
+    next_meeting(N),
+    R >= N.
 
 attempt_task(AI) :-
     (choose_task(AI, TargetTask, TargetRoom) ->
@@ -460,44 +479,85 @@ resolve_meeting :-
 
 run_votes :-
     retractall(vote(_,_)),
-    (alive(player) -> player_vote ; true),
-    ai_votes,
-    tally_votes.
+    suspicion_scores(Scores),
+    (alive(player) -> player_vote(Scores) ; true),
+    ai_votes(Scores),
+    tally_votes(Scores).
 
-player_vote :-
+player_vote(Scores) :-
     write('Cast your vote (atom ending with period). alive characters: '),
     alive_rabbits(Rs), display_names(Rs, Visible), write(Visible),nl,
     read(V),
-    (resolve_target(V, Target), alive(Target), Target \= player -> assertz(vote(player,Target)) ; write('Abstain.'),nl).
+    (resolve_target(V, Target), alive(Target), Target \= player -> assertz(vote(player,Target)) ; write('Abstain.'),nl),
+    print_suspicion_table(Scores).
 
-ai_votes :-
-    forall((alive(AI), AI \= player), ai_single_vote(AI)).
+print_suspicion_table(Scores) :-
+    write('Suspicion estimates this window:'),nl,
+    forall(member(Suspect-Score, Scores), (
+        visible_name(Suspect, Visible),
+        format('  ~w: ~2f~n',[Visible, Score])
+    )), nl.
 
-ai_single_vote(AI) :-
-    alive_targets_for_vote(AI, Candidates),
-    (AI == detective ->
-        (revealed_fox(Fox), alive(Fox) -> Vote = Fox
-        ; random_vote(Candidates, Vote))
-    ; random_vote(Candidates, Vote)
+ai_votes(Scores) :-
+    forall((alive(AI), AI \= player), ai_single_vote(AI, Scores)).
+
+ai_single_vote(AI, Scores) :-
+    findall(C, (alive(C), C \= AI), Candidates),
+    highest_suspicion(Candidates, Scores, SMax),
+    (SMax < 0.5 -> Vote = none
+    ; near_top_candidates(Candidates, Scores, SMax, Near),
+      weighted_choice(Near, Scores, Vote)
     ),
     assertz(vote(AI, Vote)),
     visible_name(AI, VisibleAI),
     visible_name(Vote, VisibleVote),
     format('~w votes for ~w.~n',[VisibleAI,VisibleVote]).
 
-alive_targets_for_vote(AI, Candidates) :-
-    findall(T, (alive(T), T \= AI), Candidates).
+highest_suspicion(Candidates, Scores, Max) :-
+    findall(S, (member(C, Candidates), candidate_score(C, Scores, S)), List),
+    (List = [] -> Max = 0 ; max_list(List, Max)).
 
-random_vote(Candidates, Vote) :-
-    Candidates \= [],
-    random_member(Vote, Candidates).
+near_top_candidates(Cands, Scores, SMax, Near) :-
+    include(within_margin(Scores, SMax), Cands, Near).
 
-tally_votes :-
+within_margin(Scores, SMax, Candidate) :-
+    candidate_score(Candidate, Scores, S),
+    Diff is SMax - S,
+    Diff =< 0.1.
+
+weighted_choice([Only], _, Only) :- !.
+weighted_choice(Cands, Scores, Choice) :-
+    findall(S-C, (member(C, Cands), candidate_score(C, Scores, S)), Pairs),
+    sum_list_weights(Pairs, Sum),
+    random(Random),
+    pick_weight(Pairs, Sum, Random, Choice).
+
+sum_list_weights(Pairs, Sum) :-
+    findall(S, member(S-_, Pairs), List),
+    sum_list(List, Sum).
+
+pick_weight([S-C|_], Sum, R, C) :-
+    Threshold is S / Sum,
+    R =< Threshold, !.
+pick_weight([S-_|Rest], Sum, R, C) :-
+    Threshold is S / Sum,
+    R1 is R - Threshold,
+    pick_weight(Rest, Sum, R1, C).
+
+candidate_score(C, Scores, S) :-
+    (member(C-S, Scores) -> true ; S = 0.0).
+
+tally_votes(Scores) :-
     findall(Target, vote(_,Target), Targets),
     count_targets(Targets,Counts),
     (Counts = [] -> write('No votes.'),nl ;
-        keysort(Counts,Sorted), reverse(Sorted, [_-Target|_]),
-        eliminate(Target)).
+        keysort(Counts,Sorted), reverse(Sorted, [TopVotes-Target|Rest]),
+        ( Target == none -> write('Most rabbits abstained.'),nl ;
+          candidate_score(Target, Scores, Sus),
+          (Sus >= 0.6, (Rest = [] ; true) -> eliminate(Target)
+          ; write('Suspicion too low for elimination.'),nl)
+        )
+    ).
 
 count_targets([],[]).
 count_targets([H|T], Counts) :-
@@ -518,10 +578,128 @@ eliminate(Target) :-
         format('~w is ejected!~n',[VisibleTarget])
     ).
 
+% Suspicion estimation using planning windows
+suspicion_scores(Scores) :-
+    findall(C, alive(C), Alive),
+    round_counter(R),
+    Window is max(1, R-3),
+    window_facts(Window, R, Facts),
+    findall(Candidate-Score, (member(Candidate, Alive), suspicion_for(Candidate, Window, R, Facts, Score)), Scores).
+
+window_facts(Start, End, Facts) :-
+    findall(round(R,F), (round_fact(R, F), R >= Start, R =< End), Facts).
+
+suspicion_for(Candidate, Start, End, Facts, Score) :-
+    plan_cost(Candidate, guilty, Start, End, Facts, LG0),
+    plan_cost(Candidate, innocent, Start, End, Facts, LI0),
+    apply_evidence_adjust(Candidate, LG0, LI0, LG, LI),
+    score_from_lengths(LG, LI, Score).
+
+apply_evidence_adjust(Candidate, LG0, LI0, LG, LI) :-
+    evidence(detective, Candidate, Strength), !,
+    adjust_value(LG0, Strength, guilty, LG),
+    adjust_value(LI0, Strength, innocent, LI).
+apply_evidence_adjust(_, LG, LI, LG, LI).
+
+adjust_value(inf, _, _, inf) :- !.
+adjust_value(V, strong, guilty, Adj) :- Adj is max(0, V - 1).
+adjust_value(V, strong, innocent, Adj) :- Adj is V + 1.
+adjust_value(V, weak, guilty, Adj) :- Adj is max(0, V - 0.5).
+adjust_value(V, weak, innocent, Adj) :- Adj is V + 0.5.
+adjust_value(V, _, _, V).
+
+score_from_lengths(inf, _, 0.0) :- !.
+score_from_lengths(_, inf, 1.0) :- !.
+score_from_lengths(LG, LI, Score) :-
+    Diff is LI - LG,
+    Base is 1 / (1 + exp(-Diff / 2.0)),
+    random_noise(Noise),
+    Temp is Base + Noise,
+    max_min(0.0, 1.0, Temp, Score).
+
+random_noise(Noise) :-
+    random(Random),
+    Noise is (Random * 0.1) - 0.05.
+
+max_min(Min, Max, Value, Clamped) :-
+    (Value < Min -> Clamped = Min ; (Value > Max -> Clamped = Max ; Clamped = Value)).
+
+plan_cost(Candidate, Role, Start, End, Facts, Cost) :-
+    starting_room(Candidate, Start, Facts, StartRoom),
+    candidate_events(Candidate, Role, Start, End, Facts, Events),
+    evaluate_events(StartRoom, Start, Events, 0, Cost).
+
+starting_room(Candidate, Start, Facts, Room) :-
+    (member(round(Start, at(Candidate, R)), Facts) -> Room = R
+    ; location(Candidate, Room)).
+
+candidate_events(Candidate, guilty, _Start, _End, Facts, Events) :-
+    findall(event(R, Room, seen), member(round(R, at(Candidate, Room)), Facts), Seen),
+    findall(event(R, Room, kill), member(round(R, killed(_, _, Room)), Facts), Kills),
+    append(Seen, Kills, All),
+    sort(1, @=<, All, Events).
+candidate_events(Candidate, innocent, _Start, _End, Facts, Events) :-
+    findall(event(R, Room, seen), member(round(R, at(Candidate, Room)), Facts), Events0),
+    sort(1, @=<, Events0, Events).
+
+evaluate_events(_, _, [], Acc, Acc).
+evaluate_events(Room, Time, [event(Round, TargetRoom, _)|Rest], Acc, Cost) :-
+    path_cost_via_pddl(Room, TargetRoom, Steps),
+    Available is Round - Time,
+    (Steps == inf ; Steps > Available -> Cost = inf
+    ; Acc1 is Acc + Steps,
+      evaluate_events(TargetRoom, Round, Rest, Acc1, Cost)
+    ).
+
+path_cost_via_pddl(From, To, Cost) :-
+    (From == To -> Cost = 0
+    ; build_path_problem(From, To, DomainFile, ProblemFile),
+      run_path_plan(DomainFile, ProblemFile, Cost) -> true
+    ; (shortest_distance(From, To, Cost) -> true ; Cost = inf)).
+
+build_path_problem(From, To, DomainFile, ProblemFile) :-
+    DomainFile = 'temp_path_domain.pddl',
+    ProblemFile = 'temp_path_problem.pddl',
+    write_path_domain(DomainFile),
+    write_path_problem(From, To, ProblemFile).
+
+write_path_domain(File) :-
+    open(File, write, Stream),
+    format(Stream, "(define (domain reachability)\n  (:requirements :strips)\n  (:predicates (at ?r) (connected ?r ?r2))\n  (:action move\n    :parameters (?from ?to)\n    :precondition (and (at ?from) (connected ?from ?to))\n    :effect (and (not (at ?from)) (at ?to)))\n)\n", []),
+    close(Stream).
+
+write_path_problem(From, To, File) :-
+    rooms(Rooms),
+    maplist(path_atom, Rooms, RoomAtoms),
+    path_atom(From, FromAtom),
+    path_atom(To, ToAtom),
+    atomic_list_concat(RoomAtoms, ' ', RoomStr),
+    open(File, write, Stream),
+    format(Stream, "(define (problem reachability-problem)\n  (:domain reachability)\n  (:objects ~s - room)\n  (:init (at ~w)~n", [RoomStr, FromAtom]),
+    forall(path(A,B), (path_atom(A, AA), path_atom(B, BB), format(Stream, "    (connected ~w ~w)~n", [AA,BB]))),
+    format(Stream, "  )\n  (:goal (at ~w))\n)\n", [ToAtom]),
+    close(Stream).
+
+path_atom(Room, Atom) :-
+    atom_string(Room, Text),
+    normalize_token(Text, Normalized),
+    atom_string(Atom, Normalized).
+
+run_path_plan(Domain, Problem, Cost) :-
+    catch(shell(format('python3 -m pyperplan ~w ~w > path_plan.txt', [Domain, Problem])),_,fail),
+    (exists_file('path_plan.txt') -> read_plan_length('path_plan.txt', Cost) ; fail).
+
+read_plan_length(File, Cost) :-
+    open(File, read, Stream),
+    read_lines(Stream, Lines),
+    close(Stream),
+    exclude(=(""), Lines, Actions),
+    length(Actions, Cost).
+
 update_meeting_timer :-
     retractall(next_meeting(_)),
     round_counter(R),
-    NM is R + 3,
+    NM is R + 4,
     retractall(next_meeting(_)),
     assertz(next_meeting(NM)),
     retractall(vote(_,_)),
@@ -538,7 +716,14 @@ tick_world :-
     R1 is R+1,
     retract(round_counter(_)),
     assertz(round_counter(R1)),
+    log_round_snapshot(R1),
     print_round(R1).
+
+log_round_snapshot(Round) :-
+    forall(location(Char,Room), (
+        alive(Char),
+        assertz(round_fact(Round, at(Char, Room)))
+    )).
 
 print_round(R) :-
     format('--- Round ~w ---~n', [R]).
