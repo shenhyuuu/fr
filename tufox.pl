@@ -954,6 +954,7 @@ generate_detective_problem(ProblemFile) :-
             detective_init(DetectiveAt),
             agents_init(Agents, AgentInit),
             inspected_init(InspectedFacts),
+            uninspected_facts(Agents, InspectedFacts, UninspectedFacts),
             goal_inspections(Agents, Goals),
             format(Stream, "(define (problem tufox-instance)~n  (:domain tufox)~n  (:objects~n", []),
             write_agent_objects(Stream, Agents),
@@ -962,6 +963,7 @@ generate_detective_problem(ProblemFile) :-
             write_alive(Stream, Agents),
             write_at(Stream, DetectiveAt, AgentInit),
             write_connections(Stream, Connections),
+            write_uninspected(Stream, UninspectedFacts),
             write_inspected(Stream, InspectedFacts),
             format(Stream, "    (fox player)~n  )~n", []),
             write_goals(Stream, Goals),
@@ -995,6 +997,14 @@ agents_init([Agent|Rest], [at(Agent, Room)|Facts]) :-
 
 inspected_init(InspectedFacts) :-
     findall(inspected(A), inspected(A), InspectedFacts).
+
+uninspected_facts(Agents, InspectedFacts, UninspectedFacts) :-
+    exclude(=(detective), Agents, Targets),
+    findall(uninspected(A),
+        ( member(A, Targets),
+          \+ member(inspected(A), InspectedFacts)
+        ),
+        UninspectedFacts).
 
 goal_inspections(Agents, Goals) :-
     exclude(=(detective), Agents, Targets),
@@ -1035,6 +1045,12 @@ write_inspected(Stream, Facts) :-
     forall(member(inspected(A), Facts), (
         pddl_atom(A, Tok),
         format(Stream, "    (inspected ~w)~n", [Tok])
+    )).
+
+write_uninspected(Stream, Facts) :-
+    forall(member(uninspected(A), Facts), (
+        pddl_atom(A, Tok),
+        format(Stream, "    (uninspected ~w)~n", [Tok])
     )).
 
 write_goals(Stream, Goals) :-

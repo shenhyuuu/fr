@@ -1,11 +1,12 @@
 (define (domain tufox)
-  (:requirements :strips :typing :negative-preconditions)
+  (:requirements :strips :typing)
   (:types agent room)
   (:predicates
     (connected ?a - room ?b - room)
     (at ?agent - agent ?room - room)
     (alive ?agent - agent)
     (inspected ?agent - agent)
+    (uninspected ?agent - agent)
     (fox ?agent - agent)
   )
 
@@ -17,7 +18,7 @@
 
   (:action inspect
     :parameters (?det - agent ?target - agent ?room - room)
-    :precondition (and (alive ?det) (alive ?target) (at ?det ?room) (at ?target ?room) (not (inspected ?target)))
-    :effect (inspected ?target)
+    :precondition (and (alive ?det) (alive ?target) (at ?det ?room) (at ?target ?room) (uninspected ?target))
+    :effect (and (inspected ?target) (not (uninspected ?target)))
   )
 )
