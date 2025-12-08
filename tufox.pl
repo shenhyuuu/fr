@@ -275,6 +275,7 @@ player_done :-
 
 player_turn :-
     (alive(player) -> true ; write('You are dead. Watching the chaos...'),nl, player_done),
+    display_map,
     read_command(Command),
     (Command == quit -> halt ; (catch(call(Command), Err, (print_message(error, Err), player_turn)))).
 
@@ -311,8 +312,7 @@ display_names(Chars, Names) :-
     maplist(visible_name, Chars, Names).
 
 show_action_feedback :-
-    print_other_characters_here,
-    display_map.
+    print_other_characters_here.
 
 print_other_characters_here :-
     location(player, Room),
@@ -804,7 +804,7 @@ repeat_char(N, Char, String) :-
     maplist(=(Char), Chars),
     atomics_to_string(Chars, '', String).
 
-cell_display(Room, [RoomLine, TaskLine]) :-
+cell_display(Room, [RoomLine, TaskLine, OccupantLine]) :-
     room_label(Room, Label),
     player_hint(Room, PH),
     task_hint(Room, TH),
@@ -813,7 +813,8 @@ cell_display(Room, [RoomLine, TaskLine]) :-
     ->  RoomLine = Label
     ;   atomics_to_string([Label|Hints], ' ', RoomLine)
     ),
-    room_tasks_line(Room, TaskLine).
+    room_tasks_line(Room, TaskLine),
+    room_occupants_line(Room, OccupantLine).
 
 room_label(Room, Label) :- atom_string(Room, Label).
 
@@ -838,6 +839,15 @@ room_tasks_line(Room, Line) :-
 
 task_status_label(complete, " (done)") :- !.
 task_status_label(_, "").
+
+room_occupants_line(Room, Line) :-
+    findall(Char, (location(Char, Room), alive(Char)), Occupants),
+    display_names(Occupants, Visible),
+    (   Visible = []
+    ->  Line = ""
+    ;   atomics_to_string(Visible, ', ', Names),
+        format(string(Line), "Characters: ~w", [Names])
+    ).
 
 decrement_cooldowns :-
     forall(cooldown(Char,Skill,CD), (
